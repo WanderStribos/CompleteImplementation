@@ -16,10 +16,6 @@ y = y_train
 y = keras.utils.to_categorical(y, num_classes=10)
 y_test = keras.utils.to_categorical(y_test, num_classes=10)
 
-#Set hyperparameters:
-#mu_ort, mu_sing are fixed in the paper, and do not need to be actively set.
-prune_threshold = 0.01
-
 
 # Construct an instance of CustomModel
 inputs = keras.Input(shape=(np.shape(x)[-2], np.shape(x)[-1]))
@@ -50,10 +46,8 @@ outputs = keras.layers.Dense(
 outputs = keras.layers.Activation('softmax')(outputs)
 model = layer.CustomMetrics.CustomModel(inputs, outputs)
 
-# We don't pass a loss or metrics here.
-model.compile(optimizer=tf.keras.optimizers.SGD(learning_rate=3e-3, momentum=0.4, clipnorm=6.0))
 
-# Just use `fit` as usual -- you can use callbacks, etc.
+model.compile(optimizer=tf.keras.optimizers.SGD(learning_rate=3e-3, momentum=0.4, clipnorm=6.0))
 model.summary()
 firstFit = model.fit(x, y, epochs=200, batch_size=1000, validation_data=(x_test, y_test))
 
