@@ -3,15 +3,15 @@ import numpy as np
 from tensorflow import keras
 
 
-#Custom layer with orthogonality constraint. Features batched compression and pruning.
+#Final version of the custom layers. Features batched compression, pruning and no orthogonality constraint.
 
 
 class SVDDense(keras.layers.Layer):
     
-    def __init__(self, units=32, mu_ort = 1000, mu_sing = 1, mu_comp = 0.1, prune_threshold = 0.1  , pruning_batch_size = 1, *args, **kwargs):
+    def __init__(self, units=32, mu_norm = 1000, mu_sing = 1, mu_comp = 0.1, prune_threshold = 0.1  , pruning_batch_size = 1, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.units = units
-        self.mu_ort = mu_ort
+        self.mu_norm = mu_norm
         self.mu_sing = mu_sing
         self.mu_comp = mu_comp
         self.prune_threshold = prune_threshold
@@ -53,14 +53,12 @@ class SVDDense(keras.layers.Layer):
         #Change the rank to a tensorflow tensor, to allow it to be used during call. Done here as self.addweight requires integers
         self.rank = tf.Variable(self.rank, trainable=False, dtype=tf.int32)
 
-
     def call(self, inputs):
 
         #Truncate matrices. Sadly, tensorflow does not allow for weights to decrease in size without recompiling the model, so for this implementation we actively truncate it. This does mean it only trains the truncated part, but also means the parameters are still saved.
         current_u = self.u[:, :self.rank]
         current_sigma = self.sigma[:self.rank]
         current_vt = self.vt[:self.rank]
-        #rank_f = tf.cast(self.rank, tf.float32)
 
         #Pick the last n singular values, and the last n before that.
         smallest_batch = tf.reduce_sum(current_sigma[-self.pruning_batch_size:])
@@ -76,15 +74,19 @@ class SVDDense(keras.layers.Layer):
             )),
             lambda: self.rank
         )
-        
+
+        #Get collumns of matrices, for use in normality constraint
+
+        # v_collums = tf.reduce_mean(tf.abs(1-tf.reduce_sum(tf.square(current_vt), axis=0)))
+        # u_collums = tf.reduce_mean(tf.abs(1-tf.reduce_sum(tf.square(current_vt), axis=1)))
+
         #Calculate structural and compression loss for this layer
         self.add_loss(
-            
-            #orthonormality loss
-            self.mu_ort * (
-                tf.reduce_mean(tf.square(tf.matmul(current_u, current_u, transpose_a=True) - tf.eye(tf.shape(current_sigma)[0]))) + 
-                tf.reduce_mean(tf.square(tf.matmul(current_vt, current_vt, transpose_b=True) - tf.eye(tf.shape(current_sigma)[0])))
-            ) 
+            #normality loss
+            self.mu_norm * (
+                tf.reduce_mean(tf.abs(1-tf.reduce_sum(tf.square(current_vt), axis=0))) + 
+                tf.reduce_mean(tf.abs(1-tf.reduce_sum(tf.square(current_vt), axis=1)))
+            )
             +
 
             #sorting loss
@@ -96,7 +98,7 @@ class SVDDense(keras.layers.Layer):
 
             # Compression loss 
             # Different from the original paper, it simply attempts to further decrease the size of the final (smallest) singular value.
-            self.mu_comp * smallest_batch
+            self.mu_comp * smallest_batch        
         )
 
         #Calculate and return forward pass
@@ -109,9 +111,8 @@ class SVDDense(keras.layers.Layer):
         difs = weights[1:] - weights[:-1] #The differences of each value and the one after
         difsum = tf.math.divide_no_nan(tf.reduce_sum(tf.nn.relu(-difs)), #Sum of negative differences
                                        tf.reduce_sum(tf.cast(difs < 0, tf.float32))) #divided by the amount of negative differences (with 0 if dividing by 0)
-        sumnegs = tf.math.divide_no_nan(tf.reduce_sum(tf.nn.relu(-weights)),  #Sum of negative weights
-                                        tf.reduce_sum(tf.cast(weights < 0, tf.float32))) #divided by the amount of negative weights (with 0 if dividing by 0)
-        return difsum + sumnegs
+        negs = tf.nn.relu(-weights[-1]) #And a push to keep the final value above 0. 
+        return difsum + negs
 
 #Used after recompiling. Equal to a normal Dense layer, but with set starting weights.  
 class RecomposedDense(keras.layers.Layer):

@@ -1,7 +1,7 @@
 import numpy as np
 import tensorflow as tf
 import CustomModel
-import BatchedLayer as layer
+import finalLayer as layer
 from tensorflow import keras
 import matplotlib.pyplot as plt
 
@@ -22,21 +22,21 @@ inputs = keras.Input(shape=(np.shape(x)[-2], np.shape(x)[-1]))
 flattened = keras.layers.Flatten()(inputs)
 outputs = layer.SVDDense(
     units = 600,
-    lam_comp = 6,
-    prune_threshold = 0.8,
+    mu_comp = 13,
+    prune_threshold = 0.6,
     pruning_batch_size = 10,
-    mu_ort = 2,
-    mu_sing = 0.5,
+    mu_norm = 2,
+    mu_sing = 1,
     name = "first"
 )(flattened)
 outputs = keras.layers.Activation('relu')(outputs)
 outputs = layer.SVDDense(
     units = 300,
-    lam_comp = 5,
-    prune_threshold = 0.5,
+    mu_comp = 5,
+    prune_threshold = 0.4,
     pruning_batch_size = 5,
-    mu_ort = 2,
-    mu_sing = 0.5,
+    mu_norm = 2,
+    mu_sing = 1,
     name = "second"
 )(outputs)
 outputs = keras.layers.Activation('relu')(outputs)
@@ -44,12 +44,14 @@ outputs = keras.layers.Dense(
     units = 10,
 )(outputs)
 outputs = keras.layers.Activation('softmax')(outputs)
-model = layer.CustomMetrics.CustomModel(inputs, outputs)
+model = CustomModel.CustomMetrics(inputs, outputs)
 
+# We don't pass a loss or metrics here.
+model.compile(optimizer=tf.keras.optimizers.SGD(learning_rate=7e-3, momentum=0.4, clipnorm=6.0))
 
-model.compile(optimizer=tf.keras.optimizers.SGD(learning_rate=3e-3, momentum=0.4, clipnorm=6.0))
+# Just use `fit` as usual -- you can use callbacks, etc.
 model.summary()
-firstFit = model.fit(x, y, epochs=200, batch_size=1000, validation_data=(x_test, y_test))
+firstFit = model.fit(x, y, epochs=150, batch_size=1000, validation_data=(x_test, y_test))
 
 #Recompile the model to only use the pruned version.
 outputs = flattened
@@ -92,24 +94,16 @@ outputs = keras.layers.Activation('softmax')(outputs)
 
 
 newModel = CustomModel.CustomModel(inputs, outputs)
-newModel.compile(optimizer=tf.keras.optimizers.SGD(learning_rate=1e-4, momentum=0.6, clipnorm=1.0))
+newModel.compile(optimizer=tf.keras.optimizers.SGD(learning_rate=8e-4, momentum=0.6, clipnorm=2.0))
 newModel.summary()
-newModel.fit(x, y, epochs=10, batch_size=2000, validation_data=(x_test, y_test))
+newModel.fit(x, y, epochs=10, batch_size=1000, validation_data=(x_test, y_test))
 
-newModel.fit(x_test, y_test, epochs=1, batch_size=60000)
-model.fit(x_test, y_test, epochs=1, batch_size=60000)
+# for layerIndex in range(1, len(model.layers)):
+#     layer = newModel.layers[layerIndex]
+#     print("Next layer")
+#     print(layer.rank)
+    #print(layer.u[:, :layer.rank])
 
-    
-fig, ax1 = plt.subplots(1,1)
-
-ax1.plot(firstFit.history['acc'], color='g', label="Training accuracy")
-ax1.plot(firstFit.history['val_acc'], color='b', label="Validation accuracy")
-
-ax2 = ax1.twinx()
-ax2.plot(firstFit.history['rank_1'], color='y', label="First layer rank")
-ax2.plot(firstFit.history['rank_2'], color='r', label="Second layer rank")
-ax2.set_ylim(ymin=0)
-
-#ax[0].plot(firstFit.history['val_loss'], color='r', label="Validation Loss",axes =ax[0])
-ax1.legend(loc=4, bbox_to_anchor=(0, 0, 1, 1), shadow=True)
-ax2.legend(loc=4, bbox_to_anchor=(-0.39, 0, 1, 1), shadow=True)
+    # print(tf.matmul(layer.u[:, :layer.rank], layer.u[:, :layer.rank], transpose_a=True) - tf.eye(int(layer.rank)))
+    # print(layer.sigma[:layer.rank])
+    # print(tf.matmul(layer.vt[:layer.rank], layer.vt[:layer.rank], transpose_b=True) - tf.eye(int(layer.rank)))
